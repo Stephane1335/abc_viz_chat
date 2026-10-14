@@ -6,6 +6,9 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,13 +16,48 @@ import {
 } from "recharts";
 import styles from "./index.module.css";
 
-const sampleDataset = `month,revenue
-January,4200
-February,5100
-March,4800
-April,6700
-May,7400
-June,8100`;
+function formatPreviewValue(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+const sampleDatasets = [
+  {
+    label: "Sales Data",
+    content: `month,online,in_store
+January,12400,9800
+February,13900,10200
+March,15100,11700
+April,14600,12600
+May,17800,13900
+June,19200,15100`,
+  },
+  {
+    label: "Monthly Temperatures",
+    content: `month,average_temperature_c
+January,4
+February,6
+March,10
+April,15
+May,20
+June,24
+July,27
+August,26
+September,22
+October,16
+November,10
+December,5`,
+  },
+  {
+    label: "Customer Feedback Scores",
+    content: `service,average_score_out_of_5
+Delivery,4.2
+Product quality,4.7
+Support,3.9
+Checkout,4.5
+Returns,3.6`,
+  },
+];
 
 export default function Home() {
   const [dataset, setDataset] = useState("");
@@ -45,7 +83,7 @@ export default function Home() {
   const analyzeDataset = async (event) => {
     event.preventDefault();
     if (!dataset.trim()) {
-      setError("Add a CSV or JSON dataset before running the analysis.");
+      setError("Add data or text before running the analysis.");
       return;
     }
     setIsLoading(true);
@@ -59,7 +97,7 @@ export default function Home() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Analysis failed.");
       setAnalysis(result);
-      setChartType(result.chart?.type === "line" ? "line" : "bar");
+      setChartType(result.chartType || "bar");
     } catch (requestError) {
       setError(requestError.message || "Something went wrong. Please try again.");
     } finally {
@@ -67,7 +105,19 @@ export default function Home() {
     }
   };
 
-  const chartData = analysis?.chart?.data || [];
+  const chartPayload = analysis?.chartData || {};
+  const chartData = Array.isArray(chartPayload.labels)
+    ? chartPayload.labels.map((label, pointIndex) => {
+        const point = { label };
+        chartPayload.datasets?.forEach((dataset, datasetIndex) => {
+          point[`series${datasetIndex}`] = dataset.data?.[pointIndex];
+        });
+        return point;
+      })
+    : [];
+  const previewColumns = analysis?.cleanedData?.columns || [];
+  const previewRecords = analysis?.cleanedData?.records || [];
+  const seriesColors = ["#258c78", "#d36b4b", "#637aa8", "#c69a3c"];
 
   return (
     <div className={styles.appShell}>
@@ -93,13 +143,13 @@ export default function Home() {
           <form className={styles.inputPanel} onSubmit={analyzeDataset}>
             <div className={styles.panelHeading}>
               <div><p className={styles.sectionLabel}>01 / SOURCE</p><h2>Bring your data</h2></div>
-              <span className={styles.fileTypes}>CSV · JSON</span>
+              <span className={styles.fileTypes}>CSV · JSON · TXT</span>
             </div>
             <label className={styles.dropZone} htmlFor="dataset-file">
               <span className={styles.uploadIcon} aria-hidden="true">↑</span>
               <span className={styles.dropTitle}>Choose a file to upload</span>
               <span className={styles.dropHint}>or paste your data below</span>
-              <input className={styles.fileInput} id="dataset-file" type="file" accept=".csv,.json,text/csv,application/json" onChange={handleFile} />
+              <input className={styles.fileInput} id="dataset-file" type="file" accept=".csv,.json,.txt,text/csv,application/json,text/plain" onChange={handleFile} />
             </label>
             {fileName && <p className={styles.fileName}><span className={styles.fileDot} />{fileName}</p>}
             <label className={styles.textareaLabel} htmlFor="dataset-text">Dataset content</label>
@@ -107,14 +157,33 @@ export default function Home() {
               className={styles.textarea}
               id="dataset-text"
               name="dataset"
-              placeholder={'Paste CSV or JSON here...\n\nmonth,revenue\nJanuary,4200\nFebruary,5100'}
+              placeholder={'Paste CSV, JSON, or unstructured text...\n\nmonth,revenue\nJanuary,4200\nFebruary,5100'}
               value={dataset}
               onChange={(event) => { setDataset(event.target.value); setFileName(""); setAnalysis(null); }}
               spellCheck="false"
             />
             {error && <p className={styles.error} role="alert">{error}</p>}
+            <div className={styles.sampleSection}>
+              <p className={styles.sampleLabel}>TRY A SAMPLE</p>
+              <div className={styles.samplePresets}>
+                {sampleDatasets.map((sample) => (
+                  <button
+                    className={styles.samplePreset}
+                    key={sample.label}
+                    type="button"
+                    onClick={() => {
+                      setDataset(sample.content);
+                      setFileName("");
+                      setAnalysis(null);
+                      setError("");
+                    }}
+                  >
+                    {sample.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className={styles.formActions}>
-              <button className={styles.sampleButton} type="button" onClick={() => { setDataset(sampleDataset); setFileName(""); setAnalysis(null); setError(""); }}>Load sample</button>
               <button className={styles.analyzeButton} type="submit" disabled={isLoading || !dataset.trim()}>
                 {isLoading ? "Analyzing..." : "Analyze data"}{!isLoading && <span aria-hidden="true">↗</span>}
               </button>
@@ -129,33 +198,33 @@ export default function Home() {
                   <div><p className={styles.sectionLabel}>02 / ANALYSIS</p><h2>Here&apos;s the picture</h2></div>
                   <span className={styles.readyBadge}><span /> ANALYSIS READY</span>
                 </div>
-                <div className={styles.summaryBlock}>
-                  <span className={styles.summaryAccent} />
-                  <div><p className={styles.summaryLabel}>THE OVERVIEW</p><p className={styles.summaryText}>{analysis.summary || "No summary was returned."}</p></div>
-                </div>
-                {analysis.statistics?.length > 0 && (
-                  <div className={styles.statsGrid}>
-                    {analysis.statistics.map((stat) => <div className={styles.statItem} key={stat.name}><span className={styles.statName}>{stat.name}</span><strong className={styles.statValue}>{stat.value}{stat.unit ? ` ${stat.unit}` : ""}</strong></div>)}
-                  </div>
-                )}
                 <div className={styles.chartSection}>
                   <div className={styles.chartHeading}>
                     <div><p className={styles.summaryLabel}>DATA BREAKDOWN</p><h3>At a glance</h3></div>
                     <div className={styles.chartToggle} aria-label="Chart type">
                       <button type="button" className={chartType === "bar" ? styles.activeToggle : ""} aria-pressed={chartType === "bar"} onClick={() => setChartType("bar")}>Bars</button>
                       <button type="button" className={chartType === "line" ? styles.activeToggle : ""} aria-pressed={chartType === "line"} onClick={() => setChartType("line")}>Line</button>
+                      <button type="button" className={chartType === "pie" ? styles.activeToggle : ""} aria-pressed={chartType === "pie"} onClick={() => setChartType("pie")}>Pie</button>
+                      <button type="button" className={chartType === "doughnut" ? styles.activeToggle : ""} aria-pressed={chartType === "doughnut"} onClick={() => setChartType("doughnut")}>Donut</button>
                     </div>
                   </div>
-                  {chartData.length > 0 ? (
+                  {chartData.length > 0 && chartPayload.datasets?.length > 0 ? (
                     <div className={styles.chart}>
                       <ResponsiveContainer width="100%" height="100%">
-                        {chartType === "line" ? (
+                        {chartType === "pie" || chartType === "doughnut" ? (
+                          <PieChart>
+                            <Tooltip contentStyle={{ border: "1px solid #e2e4dc", borderRadius: 4 }} />
+                            <Pie data={chartData} dataKey="series0" nameKey="label" innerRadius={chartType === "doughnut" ? "54%" : "0%"} outerRadius="78%" paddingAngle={2}>
+                              {chartData.map((point, pointIndex) => <Cell key={`${point.label}-${pointIndex}`} fill={seriesColors[pointIndex % seriesColors.length]} />)}
+                            </Pie>
+                          </PieChart>
+                        ) : chartType === "line" ? (
                           <LineChart data={chartData} margin={{ top: 12, right: 12, left: -14, bottom: 4 }}>
                             <CartesianGrid stroke="#e8e9e3" vertical={false} />
                             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#777c72", fontSize: 11 }} />
                             <YAxis tickLine={false} axisLine={false} tick={{ fill: "#777c72", fontSize: 11 }} />
                             <Tooltip contentStyle={{ border: "1px solid #e2e4dc", borderRadius: 4 }} />
-                            <Line type="monotone" dataKey="value" stroke="#d36b4b" strokeWidth={3} dot={{ r: 4, fill: "#d36b4b", strokeWidth: 0 }} activeDot={{ r: 6 }} />
+                            {chartPayload.datasets.map((dataset, datasetIndex) => <Line key={dataset.label} type="monotone" dataKey={`series${datasetIndex}`} name={dataset.label} stroke={seriesColors[datasetIndex % seriesColors.length]} strokeWidth={3} dot={{ r: 4, strokeWidth: 0 }} activeDot={{ r: 6 }} />)}
                           </LineChart>
                         ) : (
                           <BarChart data={chartData} margin={{ top: 12, right: 12, left: -14, bottom: 4 }}>
@@ -163,18 +232,39 @@ export default function Home() {
                             <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "#777c72", fontSize: 11 }} />
                             <YAxis tickLine={false} axisLine={false} tick={{ fill: "#777c72", fontSize: 11 }} />
                             <Tooltip contentStyle={{ border: "1px solid #e2e4dc", borderRadius: 4 }} />
-                            <Bar dataKey="value" fill="#258c78" radius={[3, 3, 0, 0]} maxBarSize={48} />
+                            {chartPayload.datasets.map((dataset, datasetIndex) => <Bar key={dataset.label} dataKey={`series${datasetIndex}`} name={dataset.label} fill={seriesColors[datasetIndex % seriesColors.length]} radius={[3, 3, 0, 0]} maxBarSize={48} />)}
                           </BarChart>
                         )}
                       </ResponsiveContainer>
                     </div>
                   ) : <div className={styles.chartEmpty}>No chartable data points were found in this analysis.</div>}
                 </div>
-                {analysis.insights?.length > 0 && (
-                  <div className={styles.insightsSection}>
-                    <p className={styles.summaryLabel}>WHAT STANDS OUT</p>
-                    <ul className={styles.insightsList}>{analysis.insights.map((insight, index) => <li key={`${index}-${insight}`}><span className={styles.insightNumber}>{String(index + 1).padStart(2, "0")}</span><span>{insight}</span></li>)}</ul>
-                  </div>
+                <section className={styles.insightBox} aria-label="AI Insight and Interpretation">
+                  <p className={styles.insightTitle}>AI INSIGHT &amp; INTERPRETATION</p>
+                  <p className={styles.insightText}>{analysis.analysis || "No interpretation was returned."}</p>
+                </section>
+                {previewColumns.length > 0 && previewRecords.length > 0 && (
+                  <section className={styles.previewSection}>
+                    <div className={styles.previewHeading}>
+                      <p className={styles.insightTitle}>NORMALIZED DATA PREVIEW</p>
+                      <span>{previewRecords.length} rows</span>
+                    </div>
+                    <div className={styles.tableWrap}>
+                      <table className={styles.previewTable}>
+                        <thead>
+                          <tr>{previewColumns.map((column) => <th key={column.name}>{column.name}</th>)}</tr>
+                        </thead>
+                        <tbody>
+                          {previewRecords.slice(0, 8).map((record, rowIndex) => (
+                            <tr key={rowIndex}>
+                              {previewColumns.map((column) => <td key={column.name}>{formatPreviewValue(record[column.name])}</td>)}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {previewRecords.length > 8 && <p className={styles.previewNote}>Showing 8 of {previewRecords.length} normalized rows.</p>}
+                  </section>
                 )}
               </>
             ) : (
@@ -183,7 +273,7 @@ export default function Home() {
                 <p className={styles.sectionLabel}>YOUR CANVAS IS READY</p>
                 <h2>Good data tells a story.</h2>
                 <p>Upload a file or paste a dataset to see its summary, key signals, and chart.</p>
-                <div className={styles.emptyFootnote}><span /> CSV / JSON supported</div>
+                <div className={styles.emptyFootnote}><span /> CSV / JSON / TXT supported</div>
               </div>
             )}
           </section>
